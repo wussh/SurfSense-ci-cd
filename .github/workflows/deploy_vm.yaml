@@ -1,0 +1,40 @@
+name: Deploy SurfSense
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Add Cloudflare GPG key
+        run: |
+          sudo mkdir -p --mode=0755 /usr/share/keyrings
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+
+      - name: Add Cloudflare repo to APT sources
+        run: |
+          echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+
+      - name: Install cloudflared
+        run: sudo apt-get update && sudo apt-get install -y cloudflared
+
+      - name: SSH via Cloudflare Tunnel and Deploy
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh -o "StrictHostKeyChecking=no" \
+              -o "ProxyCommand=cloudflared access ssh --hostname linux.wush.site" \
+              softwaredev@linux.wush.site << 'EOF'
+                set -e
+                cd /tmp/SurfSense-ci-cd
+                git pull origin main
+                sudo systemctl restart surfsense-backend.service
+                sudo systemctl restart surfsense-frontend.service
+          EOF
